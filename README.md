@@ -1,430 +1,158 @@
-# \# NN-Q Adaptive Kalman Filter for ADC0804
+# NN-Q Adaptive Kalman Filter for Low-Resolution ADCs
 
-# 
+**Adaptive noise reduction for 8-bit ADC signals using a neural network–controlled Kalman filter.**
+Pure NumPy · 288 weights · 264 MACs/sample · No external ML frameworks
 
-# 
+---
 
-# \\
+## Overview
 
-# 
+Low-resolution ADCs suffer from quantization noise.
+For an 8-bit ADC (5V reference):
 
-# \*\*Neural network–adaptive process noise (Q) for a 1-state Kalman filter applied to low-resolution ADC signals.\*\*
+```
+Noise ≈ LSB / √12 ≈ 5.64 mV
+```
 
-# Pure NumPy · 288 weights · 264 MACs/sample · No external ML frameworks
+This project improves effective resolution using:
 
-# 
+* **Oversampling (4× moving average)**
+* **Adaptive Kalman filtering with learned process noise (Q)**
 
-# \---
+---
 
-# 
+## Pipeline
 
-# \## Overview
+```
+Raw ADC (10 kSPS)
+      │
+      ▼  4× Moving Average
+      →  noise: 5.64 → 2.82 mV  (+1 bit)
+      │
+      ▼  NN-Q Adaptive Kalman (1-state)
+      →  noise: ~2.82 → ~1.93 mV  (~+0.5 bit typical)
+      │
+      ▼  Output
+```
 
-# 
+**Measured improvement:** ~+1.5 bits ENOB
+**Theoretical limit:** ~+2.7 bits (signal-dependent)
 
-# A standard 8-bit ADC (ADC0804, VREF = 5 V) has a quantization noise floor of:
+---
 
-# 
+## Key Idea
 
-# ```
+A standard Kalman filter uses a fixed process noise (Q).
 
-# √(LSB² / 12) ≈ 5.64 mV
+This project instead:
 
-# ```
+* learns Q dynamically using a small neural network
+* uses recent innovations (last 8 samples)
+* adapts filtering strength in real time
 
-# 
+Result:
 
-# This project demonstrates how a combination of \*\*oversampling + adaptive Kalman filtering\*\* can reduce effective noise and improve ENOB.
+* Strong noise reduction in steady regions
+* Fast response during signal changes
 
-# 
+---
 
-# \### Pipeline
+## Results
 
-# 
+### Full System Behavior
 
-# ```
+![Dashboard](images/dashboard.png)
 
-# 10 kSPS raw ADC
+Shows adaptive Q, variance reduction, and overall system dynamics.
 
-# &#x20;     │
+---
 
-# &#x20;     ▼  4× Moving Average (Decimation)
+### Close-up (Noise Reduction)
 
-# 2.5 kSPS  →  noise: 5.64 → 2.82 mV  (+1.00 bit)
+![Closeup](images/closeup.png)
 
-# &#x20;     │
+Subtle noise reduction (~0.5 bit) without signal distortion.
+Improvement matches theoretical expectations for a 1-state Kalman filter.
 
-# &#x20;     ▼  NN-Q Adaptive Kalman (1-state)
+---
 
-# 2.5 kSPS  →  noise: \~2.82 → \~1.93 mV  (\~+0.5 bit typical)
+## Performance (Real ADC Data)
 
-# &#x20;     │
+| Stage       | Noise (RMS) | Gain           |
+| ----------- | ----------- | -------------- |
+| Raw ADC     | 5.64 mV     | —              |
+| 4× MA       | 2.82 mV     | +1.00 bit      |
+| NN-Q Kalman | ~1.93 mV    | +0.5 bit       |
+| **Total**   | —           | **~+1.5 bits** |
 
-# &#x20;     ▼  Output
+* Correlation: >0.999 (no distortion)
+* Adaptive Q spans multiple orders of magnitude
 
-# ```
+---
 
-# 
+## Neural Network
 
-# \*\*Measured improvement (real ADC data): \~+1.5 bits ENOB\*\*
+```
+Input: 8-sample innovation history
+ → Dense (16, tanh)
+ → Dense (8, tanh)
+ → Output (Q)
+```
 
-# \*\*Theoretical ceiling: \~+2.7 bits (signal-dependent)\*\*
+* Parameters: 288
+* Compute: 264 MACs/sample
+* Framework: NumPy only
 
-# 
+---
 
-# \---
+## Installation
 
-# 
+```bash
+git clone https://github.com/vedantvikrampathak8-cloud/nn-q-kalman.git
+cd nn-q-kalman
+pip install numpy scipy matplotlib
+```
 
-# \## Key Idea
+---
 
-# 
+## Usage
 
-# Instead of using a fixed process noise (Q), this work:
+```bash
+python nn_kalman_1state.py data/sample_adc.csv
+```
 
-# 
+Also supports:
 
-# \* learns Q dynamically using a \*\*tiny neural network\*\*
+* `.txt` (raw ADC values)
+* `.mat` (ECG data)
+* synthetic demo (no input)
 
-# \* uses \*\*innovation history (last 8 samples)\*\* as input
+---
 
-# \* adapts filtering strength in real time
+## Data
 
-# 
+A small real ADC sample is included:
 
-# Result:
+```
+data/sample_adc.csv
+```
 
-# 
+Used for:
 
-# \* Low noise during steady regions
+* quick testing
+* reproducibility
 
-# \* Fast response during signal changes
+---
 
-# 
+## Limitations
 
-# \---
+* Moving average reduces high-frequency content
+* Kalman introduces small phase lag
+* Performance depends on signal dynamics
+* Training data influences generalization
 
-# 
+---
 
-# \## Why 1-State Kalman?
+## License
 
-# 
-
-# A 2-state (position + velocity) model introduces:
-
-# 
-
-# ```
-
-# DT² · P\[1,1] → noise leakage into position estimate
-
-# ```
-
-# 
-
-# The 1-state model avoids this entirely:
-
-# 
-
-# \* simpler
-
-# \* more stable
-
-# \* predictable steady-state behavior
-
-# 
-
-# \---
-
-# 
-
-# \## Results (Real ADC Data)
-
-# 
-
-# | Stage       | Noise (RMS)  | ENOB Gain      |
-
-# | ----------- | ------------ | -------------- |
-
-# | Raw ADC     | 5.64 mV      | baseline       |
-
-# | 4× MA       | 2.82 mV      | +1.00 bit      |
-
-# | NN-Q Kalman | \*\*\~1.93 mV\*\* | \*\*+0.5 bit\*\*   |
-
-# | \*\*Total\*\*   | —            | \*\*\~+1.5 bits\*\* |
-
-# 
-
-# Additional observations:
-
-# 
-
-# \* Correlation with input: \*\*0.999+\*\*
-
-# \* No visible signal distortion
-
-# \* Adaptive Q spans multiple orders of magnitude
-
-# 
-
-# \---
-
-# 
-
-# \## ENOB Validation (Sine Test)
-
-# 
-
-# Using IEEE-style sine-fit:
-
-# 
-
-# \* Input ENOB: \~7.1 bits
-
-# \* Output ENOB: \~9.8 bits
-
-# \* Improvement: \*\*\~+2.7 bits (near theoretical limit)\*\*
-
-# 
-
-# Note:
-
-# This represents \*\*best-case performance\*\* under controlled conditions.
-
-# 
-
-# \---
-
-# 
-
-# \## Neural Network
-
-# 
-
-# Architecture:
-
-# 
-
-# ```
-
-# 8 (innovation history)
-
-# &#x20;→ 16 (tanh)
-
-# &#x20;→ 8 (tanh)
-
-# &#x20;→ 1 (softplus + clamp)
-
-# ```
-
-# 
-
-# \* Parameters: \*\*288 weights\*\*
-
-# \* Compute: \*\*264 MACs/sample\*\*
-
-# \* Framework: \*\*pure NumPy\*\*
-
-# 
-
-# \---
-
-# 
-
-# \## Training Strategy
-
-# 
-
-# Two-stage approach:
-
-# 
-
-# 1\. \*\*Pool Training\*\*
-
-# 
-
-# &#x20;  \* Gyro signals (drift + motion)
-
-# &#x20;  \* ECG signals (spikes + quiet regions)
-
-# &#x20;  \* Synthetic oscillations (critical for frequency coverage)
-
-# 
-
-# 2\. \*\*Fine-tuning\*\*
-
-# 
-
-# &#x20;  \* Adapt Q scaling to the target signal
-
-# 
-
-# 3\. \*\*Calibration\*\*
-
-# 
-
-# &#x20;  \* Ensures Q reaches minimum during quiet periods
-
-# 
-
-# \---
-
-# 
-
-# \## Installation
-
-# 
-
-# ```bash
-
-# git clone https://github.com/vedantvikrampathak8-cloud/nn-q-kalman.git
-
-# cd nn-q-kalman
-
-# pip install numpy scipy matplotlib
-
-# ```
-
-# 
-
-# \---
-
-# 
-
-# \## Usage
-
-# 
-
-# ```bash
-
-# \# Run on ADC CSV
-
-# python nn\_kalman\_1state.py yourfile.csv
-
-# 
-
-# \# Raw ADC values
-
-# python nn\_kalman\_1state.py yourfile.txt
-
-# 
-
-# \# ECG data
-
-# python nn\_kalman\_1state.py file.mat
-
-# 
-
-# \# Synthetic demo
-
-# python nn\_kalman\_1state.py
-
-# 
-
-# \# ENOB validation
-
-# python nn\_kalman\_1state.py --test-enob
-
-# ```
-
-# 
-
-# \---
-
-# 
-
-# \## Output
-
-# 
-
-# Each run generates:
-
-# 
-
-# \* `\*\_dashboard.png` → diagnostics (Q, P, residuals, etc.)
-
-# \* `\*\_closeup.png` → zoomed signal view
-
-# \* `\*\_output.csv` → processed data
-
-# 
-
-# \---
-
-# 
-
-# \## Interpreting Results
-
-# 
-
-# \* \*\*Q trace:\*\* should rise during transitions, fall in steady regions
-
-# \* \*\*Variance P:\*\* should drop below measurement noise in quiet regions
-
-# \* \*\*Innovations:\*\* tighter distribution = better filtering
-
-# \* \*\*Residuals:\*\* NN-Q may deviate more from noisy input (expected)
-
-# 
-
-# \---
-
-# 
-
-# \## Limitations
-
-# 
-
-# \* Moving average reduces high-frequency content
-
-# \* Kalman introduces small phase lag
-
-# \* Performance depends on signal characteristics
-
-# \* Training distribution affects generalization
-
-# 
-
-# \---
-
-# 
-
-# \## Contribution / Citation
-
-# 
-
-# If used in research:
-
-# 
-
-# ```bibtex
-
-# @software{nn\_q\_kalman\_2026,
-
-# &#x20; author = {Vedant},
-
-# &#x20; title  = {NN-Q Adaptive Kalman Filter},
-
-# &#x20; year   = {2026},
-
-# &#x20; url    = {https://github.com/vedantvikrampathak8-cloud/nn-q-kalman}
-
-# }
-
-# ```
-
-# 
-
-# \---
-
-# 
-
-# \## License
-
-# 
-
-# Apache 2.0
-
-
-
+Apache 2.0
